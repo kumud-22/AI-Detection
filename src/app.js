@@ -345,13 +345,18 @@ function buildDynamicWorkflow(modelId, confidence, workspaceName) {
 // ============================================================
 
 function getCameraConfig() {
+  // Prioritize low-latency inference over high-resolution input.
+  // Keep the camera feed at VGA and cap capture to 5 FPS so frames
+  // do not queue up faster than the remote inference pipeline can process.
   const resolution = $("resolutionSelect")?.value?.split("x") || [];
+  const requestedWidth = Number.parseInt(resolution[0], 10) || 640;
+  const requestedHeight = Number.parseInt(resolution[1], 10) || 480;
 
   return {
     deviceId: $("cameraSelect")?.value || undefined,
-    width: Number.parseInt(resolution[0], 10) || 640,
-    height: Number.parseInt(resolution[1], 10) || 480,
-    frameRate: Number.parseInt($("fpsSelect")?.value, 10) || 15
+    width: Math.min(requestedWidth, 640),
+    height: Math.min(requestedHeight, 480),
+    frameRate: 5
   };
 }
 
@@ -403,9 +408,9 @@ async function connectToRoboflow() {
   }
 
   const videoConstraints = {
-    width: { ideal: camera.width },
-    height: { ideal: camera.height },
-    frameRate: { ideal: camera.frameRate, max: camera.frameRate }
+    width: { ideal: camera.width, max: 640 },
+    height: { ideal: camera.height, max: 480 },
+    frameRate: { ideal: 5, max: 5 }
   };
 
   if (camera.deviceId) {
