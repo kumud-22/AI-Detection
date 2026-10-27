@@ -67,6 +67,10 @@ let lastDetections = [];
 let sessionClasses = new Set();
 let history = loadJSON(STORAGE.history, []);
 let lastHealth = null;
+let pendingInferenceData = null;
+let inferenceUiTimer = null;
+let lastHistorySignature = "";
+let lastHistoryWriteAt = 0;
 
 // ============================================================
 // SAFE LOCAL STORAGE
@@ -604,23 +608,30 @@ function confidencePercent(prediction) {
 }
 
 function handleInferenceData(data) {
-  console.log("[VISION LAB] Raw inference data:", data);
+  // Keep only the newest callback payload and update the UI at most 5 times/sec.
+  // This avoids expensive DOM and localStorage work competing with video playback.
+  pendingInferenceData = data;
+  if (inferenceUiTimer !== null) return;
 
-  const predictions = findPredictions(data);
-  console.log("[VISION LAB] Parsed predictions:", predictions);
+  inferenceUiTimer = window.setTimeout(() => {
+    inferenceUiTimer = null;
+    const latestData = pendingInferenceData;
+    pendingInferenceData = null;
+    if (latestData == null) return;
 
-  lastDetections = predictions;
-  eventCount++;
-  predictions.forEach(prediction => sessionClasses.add(predictionName(prediction)));
+    const predictions = findPredictions(latestData);
+    lastDetections = predictions;
+    eventCount++;
+    predictions.forEach(prediction => sessionClasses.add(predictionName(prediction)));
 
-  if (els.totalDetections) els.totalDetections.textContent = String(eventCount);
-  if (els.uniqueClasses) els.uniqueClasses.textContent = String(sessionClasses.size);
-  if (els.dashEvents) els.dashEvents.textContent = String(eventCount);
-  if (els.dashClasses) els.dashClasses.textContent = String(sessionClasses.size);
+    if (els.totalDetections) els.totalDetections.textContent = String(eventCount);
+    if (els.uniqueClasses) els.uniqueClasses.textContent = String(sessionClasses.size);
+    if (els.dashEvents) els.dashEvents.textContent = String(eventCount);
+    if (els.dashClasses) els.dashClasses.textContent = String(sessionClasses.size);
 
-  renderDetections(predictions);
-  renderDashboardRecent();
-  if (predictions.length) updateHistoryFromPredictions(predictions);
+    renderDetections(predictions);
+    if (predictions.length) updateHistoryFromPredictions(predictions);
+  }, 200);
 }
 
 // ============================================================
@@ -688,11 +699,23 @@ function renderDetections(predictions) {
 function updateHistoryFromPredictions(predictions) {
   if (!predictions.length) return;
 
-  const now = new Date().toISOString();
+  const nowMs = Date.now();
+  // Avoid recording the same set of objects over and over on adjacent frames.
+  // Also limit localStorage writes and full history re-renders to one per 1.5 seconds.
+  if (nowMs - lastHistoryWriteAt < 1500) return;
+
+  const signature = [...new Set(predictions.map(predictionName))]
+    .sort((a, b) => a.localeCompare(b))
+    .join("|");
+  if (signature === lastHistorySignature) return;
+
+  lastHistorySignature = signature;
+  lastHistoryWriteAt = nowMs;
+  const now = new Date(nowMs).toISOString();
 
   predictions.forEach(prediction => {
     history.unshift({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `${nowMs}-${Math.random().toString(36).slice(2, 8)}`,
       time: now,
       name: predictionName(prediction),
       confidence: confidencePercent(prediction)
@@ -700,9 +723,10 @@ function updateHistoryFromPredictions(predictions) {
   });
 
   // Keep browser storage bounded.
-  history = history.slice(0, 500);
+  history = history.slice(0, 200);
   saveJSON(STORAGE.history, history);
   renderHistory();
+  renderDashboardRecent();
 }
 
 function formatTime(iso) {
