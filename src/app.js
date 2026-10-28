@@ -542,51 +542,73 @@ els.stop.addEventListener("click", stopStream);
 
 function isPrediction(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const name = value.class ?? value.class_name ?? value.className ?? value.label ?? value.category;
-  return typeof name === "string" && name.trim().length > 0;
+
+  const name = value.class ?? value.class_name ?? value.className ??
+    value.label ?? value.category ?? value.name;
+  const hasBox =
+    Number.isFinite(Number(value.x)) ||
+    Number.isFinite(Number(value.left)) ||
+    Number.isFinite(Number(value.xmin)) ||
+    Number.isFinite(Number(value.width)) ||
+    Number.isFinite(Number(value.bbox?.x));
+
+  // Avoid treating arbitrary workflow metadata as a detection.
+  return typeof name === "string" && name.trim().length > 0 &&
+    (hasBox || value.confidence != null || value.score != null ||
+      value.class_confidence != null || value.classConfidence != null);
 }
 
-function findPredictions(data, depth = 0) {
-  if (depth > 8 || data == null) return [];
+function findPredictions(data, depth = 0, seen = new Set()) {
+  if (depth > 10 || data == null) return [];
 
   if (typeof data === "string") {
     const trimmed = data.trim();
     if ((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
         (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
-      try { return findPredictions(JSON.parse(trimmed), depth + 1); }
+      try { return findPredictions(JSON.parse(trimmed), depth + 1, seen); }
       catch { return []; }
     }
     return [];
   }
 
+  if (typeof data !== "object" || seen.has(data)) return [];
+  seen.add(data);
+
   if (Array.isArray(data)) {
     const direct = data.filter(isPrediction);
     if (direct.length) return direct;
     for (const item of data) {
-      const nested = findPredictions(item, depth + 1);
+      const nested = findPredictions(item, depth + 1, seen);
       if (nested.length) return nested;
     }
     return [];
   }
 
-  if (typeof data !== "object") return [];
-
-  // Common direct prediction arrays from object-detection workflows.
+  // Prefer known object-detection result keys before exploring other outputs.
   for (const key of ["predictions", "detections", "objects", "results"]) {
-    if (Array.isArray(data[key])) {
-      const direct = data[key].filter(isPrediction);
+    const value = data[key];
+    if (Array.isArray(value)) {
+      const direct = value.filter(isPrediction);
       if (direct.length) return direct;
-      for (const item of data[key]) {
-        const nested = findPredictions(item, depth + 1);
-        if (nested.length) return nested;
-      }
+    }
+    if (value && typeof value === "object") {
+      const nested = findPredictions(value, depth + 1, seen);
+      if (nested.length) return nested;
     }
   }
 
-  // Search nested workflow outputs, skipping image/display payloads.
+  // Roboflow workflow callbacks can wrap outputs under outputs/data/result.
+  for (const key of ["outputs", "data", "result", "output", "workflow", "steps"]) {
+    if (data[key] != null) {
+      const nested = findPredictions(data[key], depth + 1, seen);
+      if (nested.length) return nested;
+    }
+  }
+
+  // Fall back to nested values, excluding image payloads and metadata.
   for (const [key, value] of Object.entries(data)) {
-    if (/^(image|frame|video|canvas|visualization|metadata|time|timestamp)$/i.test(key)) continue;
-    const nested = findPredictions(value, depth + 1);
+    if (/^(image|frame|video|canvas|visualization|metadata|time|timestamp|image_bytes)$/i.test(key)) continue;
+    const nested = findPredictions(value, depth + 1, seen);
     if (nested.length) return nested;
   }
 
@@ -595,7 +617,8 @@ function findPredictions(data, depth = 0) {
 
 function predictionName(prediction) {
   const value = prediction?.class ?? prediction?.class_name ??
-    prediction?.className ?? prediction?.label ?? prediction?.category;
+    prediction?.className ?? prediction?.label ?? prediction?.category ??
+    prediction?.name;
   return typeof value === "string" && value.trim() ? value.trim() : "Unknown object";
 }
 
@@ -607,14 +630,12 @@ function confidencePercent(prediction) {
   const number = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(number)) return null;
 
-  // Roboflow scores are commonly 0–1, but some output formats use 0–100.
   const percent = number <= 1 ? number * 100 : number;
   return Math.round(Math.max(0, Math.min(100, percent)));
 }
 
 function handleInferenceData(data) {
-  // Keep only the newest callback payload and update the UI at most 5 times/sec.
-  // This avoids expensive DOM and localStorage work competing with video playback.
+  // Keep the latest result and update the live sidebar at most 5 times/sec.
   pendingInferenceData = data;
   if (inferenceUiTimer !== null) return;
 
@@ -642,11 +663,10 @@ function handleInferenceData(data) {
 // ============================================================
 // LIVE DETECTION SIDEBAR
 // ============================================================
-// ============================================================
-// LIVE DETECTION SIDEBAR
-// ============================================================
 
 function renderDetections(predictions) {
+  if (!els.detectionList) return;
+
   if (els.visibleCount) {
     els.visibleCount.textContent =
       `${predictions.length} item${predictions.length === 1 ? "" : "s"}`;
@@ -654,7 +674,7 @@ function renderDetections(predictions) {
 
   if (!predictions.length) {
     els.detectionList.innerHTML =
-      '<div class="empty-state">No objects returned for this frame.<br/>Try improving lighting or lowering the pipeline threshold.</div>';
+      '<div class="empty-state">No objects detected in the latest frame.<br/>Keep the camera running and place an object in view.</div>';
     return;
   }
 
@@ -685,10 +705,8 @@ function renderDetections(predictions) {
     if (confidence !== null) {
       const meter = document.createElement("div");
       meter.className = "meter";
-
       const bar = document.createElement("span");
       bar.style.width = `${confidence}%`;
-
       meter.appendChild(bar);
       item.appendChild(meter);
     }
