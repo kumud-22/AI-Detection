@@ -689,6 +689,46 @@
     }
 
   </style>
+
+  <style id="live-detections-layout-fix">
+    /* Force the live feed and detections panel into a two-column layout.
+       This overrides stale appearance styles that may hide/collapse the panel. */
+    #view-live .grid-main {
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 310px) !important;
+      align-items: stretch !important;
+      gap: 18px !important;
+      width: 100% !important;
+    }
+    #view-live .grid-main > .section-stack {
+      min-width: 0 !important;
+      width: 100% !important;
+    }
+    #view-live aside.detection-panel,
+    #view-live .detection-panel[hidden],
+    #view-live .detection-panel.hidden {
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      position: relative !important;
+      width: auto !important;
+      min-width: 0 !important;
+      height: auto !important;
+      max-height: none !important;
+      align-self: stretch !important;
+    }
+    #view-live .detection-panel .panel-body {
+      min-height: 260px;
+      max-height: min(68vh, 680px);
+      overflow-y: auto;
+    }
+    @media (max-width: 850px) {
+      #view-live .grid-main {
+        grid-template-columns: minmax(0, 1fr) !important;
+      }
+    }
+  </style>
+
 </head>
 
 <body>
