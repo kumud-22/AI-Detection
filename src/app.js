@@ -928,17 +928,15 @@ function applyDisplaySettings(settings) {
     settings.density === "compact" ? "10px" : "16px"
   );
 
-  const sidebarPanel = els.detectionList.closest("aside");
-  if (sidebarPanel) {
-    sidebarPanel.classList.toggle(
-      "hidden",
-      settings.showSidebar === false
-    );
-  }
+  // Keep the Live detections panel visible as a core part of Live Vision.
+  // Older saved preferences may contain showSidebar:false; ignore that stale
+  // value so it cannot hide the panel or leave an empty grid column.
+  const sidebarPanel = els.detectionList?.closest(".detection-panel");
+  if (sidebarPanel) sidebarPanel.classList.remove("hidden");
 
   els.density.value = settings.density || "comfortable";
   els.boxStyle.value = settings.boxStyle || "normal";
-  els.showSidebar.checked = settings.showSidebar !== false;
+  if (els.showSidebar) els.showSidebar.checked = true;
 }
 
 $("saveSettingsBtn").addEventListener("click", saveSettings);
