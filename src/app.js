@@ -345,10 +345,8 @@ function buildDynamicWorkflow(modelId, confidence, workspaceName) {
 // ============================================================
 
 function getCameraConfig() {
-  // Keep the camera feed deliberately lightweight. If inference processes frames
-  // more slowly than they arrive, sending 10 FPS can build a queue and make the
-  // returned video several seconds behind real time. A 5 FPS cap prioritizes
-  // freshness over smoothness while we test whether backlog is the cause.
+  // Diagnostic low-latency profile: cap incoming frames and resolution so the
+  // inference worker has less work queued. This favors fresh frames over smoothness.
   const resolution = $("resolutionSelect")?.value?.split("x") || [];
   const requestedWidth = Number.parseInt(resolution[0], 10) || 640;
   const requestedHeight = Number.parseInt(resolution[1], 10) || 360;
